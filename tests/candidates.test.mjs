@@ -12,8 +12,9 @@ function candidateRow(keyboard) {
 }
 
 function controls(keyboard) {
-    const [previous, scroll, next] = candidateRow(keyboard).get_children();
-    return {previous, candidates: scroll.get_children()[0].get_children(), next};
+    const [previous, viewport, next] = candidateRow(keyboard).get_children();
+    const candidates = viewport.get_children()[0].get_children().filter(button => button.visible);
+    return {previous, candidates, next};
 }
 
 test('pages through the engine and selects by index within the returned page', t => {
@@ -88,6 +89,7 @@ test('leaves native suggestions available and removes bridge controls on disable
     const [nativeRow] = keyboard.get_children();
     setPage(panel, ['one'], false, false);
     assert.equal(controls(keyboard).next.visible, false);
+    assert.equal(nativeRow.visible, true);
 
     panel.showLookupTable = false;
     panel.updateInputPanel();
@@ -114,4 +116,107 @@ test('keeps candidates selectable when no page flags were observed for the curre
     assert.equal(next.visible, false);
     candidates[0].emit('clicked');
     assert.deepEqual(calls.select, [0]);
+});
+
+test('pages locally before requesting another engine page and retains candidate indices', t => {
+    const {calls, dispose, keyboard, panel} = createHarness({keyboardWidth: 160});
+    t.after(dispose);
+    setPage(panel, ['one', 'two', 'six', 'ten', 'red', 'fox'], false, true);
+    const labels = () => controls(keyboard).candidates.map(button => button.label);
+    assert.deepEqual(labels(), ['one', 'two']);
+
+    controls(keyboard).next.emit('clicked');
+    assert.deepEqual(labels(), ['six', 'ten']);
+    controls(keyboard).previous.emit('clicked');
+    assert.deepEqual(labels(), ['one', 'two']);
+    controls(keyboard).next.emit('clicked');
+    controls(keyboard).candidates[1].emit('clicked');
+
+    assert.deepEqual(calls.page, []);
+    assert.deepEqual(calls.select, [3]);
+});
+
+test('crosses engine page boundaries and enters the previous engine page at its last local slice', t => {
+    const {calls, dispose, keyboard, panel} = createHarness({keyboardWidth: 160});
+    t.after(dispose);
+    const words = ['one', 'two', 'six', 'ten', 'red', 'fox'];
+    setPage(panel, words, false, true);
+    controls(keyboard).next.emit('clicked');
+    controls(keyboard).next.emit('clicked');
+    assert.deepEqual(controls(keyboard).candidates.map(button => button.label), ['red', 'fox']);
+    assert.deepEqual(calls.page, []);
+
+    controls(keyboard).next.emit('clicked');
+    assert.deepEqual(calls.page, ['LookupTablePageDown']);
+    setPage(panel, ['cat', 'dog', 'ant', 'owl'], true, false);
+    assert.deepEqual(controls(keyboard).candidates.map(button => button.label), ['cat', 'dog']);
+    controls(keyboard).previous.emit('clicked');
+    assert.deepEqual(calls.page, ['LookupTablePageDown', 'LookupTablePageUp']);
+
+    setPage(panel, [...words], false, true);
+    assert.deepEqual(controls(keyboard).candidates.map(button => button.label), ['red', 'fox']);
+});
+
+test('keeps the first visible candidate in view when the keyboard width changes', t => {
+    const {calls, dispose, keyboard, panel} = createHarness({keyboardWidth: 160});
+    t.after(dispose);
+    setPage(panel, ['one', 'two', 'six', 'ten', 'red', 'fox'], false, true);
+    controls(keyboard).next.emit('clicked');
+    assert.equal(controls(keyboard).candidates[0].label, 'six');
+
+    keyboard.setWidth(210);
+
+    assert.deepEqual(controls(keyboard).candidates.map(button => button.label), ['one', 'two', 'six']);
+    assert.deepEqual(calls.page, []);
+});
+
+test('uses the saved font scale on keyboard creation and repaginates when it changes', t => {
+    const {calls, createKeyboard, dispose, panel, settings} = createHarness({
+        withKeyboard: false,
+        keyboardWidth: 160,
+    });
+    t.after(dispose);
+    settings.set_int('candidate-font-scale', 150);
+    setPage(panel, ['one', 'two', 'six', 'ten'], false, true);
+    const keyboard = createKeyboard();
+    const labels = () => controls(keyboard).candidates.map(button => button.label);
+    assert.deepEqual(labels(), ['one']);
+
+    controls(keyboard).next.emit('clicked');
+    assert.deepEqual(labels(), ['two']);
+    settings.set_int('candidate-font-scale', 100);
+    assert.deepEqual(labels(), ['one', 'two']);
+    assert.deepEqual(calls.page, []);
+    controls(keyboard).candidates[1].emit('clicked');
+    assert.deepEqual(calls.select, [1]);
+});
+
+test('keeps a candidate wider than the available row selectable', t => {
+    const {calls, dispose, keyboard, panel} = createHarness({keyboardWidth: 160});
+    t.after(dispose);
+    setPage(panel, ['a candidate longer than the entire keyboard'], false, false);
+
+    const {candidates} = controls(keyboard);
+    assert.equal(candidates.length, 1);
+    candidates[0].emit('clicked');
+    assert.deepEqual(calls.select, [0]);
+});
+
+test('reclaims an empty native suggestions row and restores it when bridge candidates disappear', t => {
+    const {bridge, dispose, keyboard, panel} = createHarness();
+    t.after(dispose);
+    const [nativeRow] = keyboard.get_children();
+    setPage(panel, ['one'], false, false);
+    nativeRow.destroy_all_children();
+    assert.equal(nativeRow.visible, false);
+
+    panel.showLookupTable = false;
+    panel.updateInputPanel();
+    assert.equal(nativeRow.visible, true);
+
+    panel.showLookupTable = true;
+    panel.updateInputPanel();
+    assert.equal(nativeRow.visible, false);
+    bridge.disable();
+    assert.equal(nativeRow.visible, true);
 });

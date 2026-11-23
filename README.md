@@ -4,26 +4,39 @@ Kimpanel OSK Bridge shows Fcitx5 candidates above the GNOME on-screen keyboard (
 
 ## Use
 
-- Tap a word to select it. If the page is wider than the keyboard, use the horizontal scrollbar. GNOME Shell 51 also supports swiping the list directly.
-- Tap **‹** or **›** to request the previous or next page from Fcitx5. The buttons appear when there is another page, and unavailable directions are dimmed. The row refreshes when Fcitx5 sends its updated candidate table.
+- Tap a word to select it. The candidates are centered, and each row fits the keyboard width.
+- Tap **‹** or **›** to browse candidates. A wide Fcitx5 page is split into shorter rows. The arrow moves through those rows and then requests the adjacent page from Fcitx5. Unavailable directions are dimmed.
+- Open the extension preferences with `gnome-extensions prefs kimpanel-osk-bridge@local` to adjust the candidate font size. Changes apply immediately. At 100%, candidates use the GNOME theme size.
 - The floating Kimpanel window returns when the OSK closes. Kimpanel also handles preedit or auxiliary text on its own when there are no OSK candidates to show.
 
 ## Install or update
 
-1. Keep `kimpanel@kde.org` enabled. Disable `impanel-with-osk` if installed.
-2. Copy `metadata.json`, `extension.js` and `candidateRow.js` into `~/.local/share/gnome-shell/extensions/kimpanel-osk-bridge@local/`.
-3. Log out and back in to GNOME Wayland to load the new code.
-4. If the bridge is disabled, run `gnome-extensions enable kimpanel-osk-bridge@local`.
-
-To uninstall, disable the bridge with `gnome-extensions disable kimpanel-osk-bridge@local` and remove its directory.
-
-## Verify
-
-The extension needs GNOME Shell, Fcitx5 and Kimpanel. Running the automated tests needs Node.js 22.15 or later. There are no build steps or npm dependencies.
+Keep `kimpanel@kde.org` enabled. Disable `impanel-with-osk` if installed. Run the commands below with `curl` and `unzip` to download the extension ZIP from the [latest release](https://github.com/chenxiex/kimpanel-osk-bridge/releases/latest) and overwrite the installed files.
 
 ```sh
-node --test tests/*.test.mjs
+(
+    set -eu
+    uuid=kimpanel-osk-bridge@local
+    extensions_dir="${XDG_DATA_HOME:-$HOME/.local/share}/gnome-shell/extensions"
+    download_dir=$(mktemp -d)
+    trap 'rm -rf -- "$download_dir"' EXIT
+    archive="$download_dir/$uuid.shell-extension.zip"
+
+    curl --fail --location --output "$archive" \
+        "https://github.com/chenxiex/kimpanel-osk-bridge/releases/latest/download/$uuid.shell-extension.zip"
+    unzip -tq "$archive"
+    mkdir -p "$extensions_dir/$uuid"
+    unzip -o "$archive" -d "$extensions_dir/$uuid"
+)
 ```
+
+Log out and back in to GNOME Wayland to load the new files. If the bridge is disabled, enable it after logging back in.
+
+```sh
+gnome-extensions enable kimpanel-osk-bridge@local
+```
+
+To uninstall, disable the bridge with `gnome-extensions disable kimpanel-osk-bridge@local` and remove its directory.
 
 ## Compatibility
 

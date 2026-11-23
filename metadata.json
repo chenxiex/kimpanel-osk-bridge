@@ -3,5 +3,6 @@
   "name": "Kimpanel OSK Bridge (Experimental)",
   "description": "Displays Fcitx5 Kimpanel candidates in GNOME OSK without replacing Kimpanel.",
   "shell-version": ["49", "50", "51"],
+  "settings-schema": "org.gnome.shell.extensions.kimpanel-osk-bridge",
   "version": 2
 }

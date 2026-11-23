@@ -1,0 +1,38 @@
+name: Release extension
+
+on:
+    push:
+        tags: ['v[0-9]*']
+
+jobs:
+    release:
+        if: ${{ !github.event.deleted }}
+        runs-on: ubuntu-24.04
+        permissions:
+            contents: write
+        steps:
+            - uses: actions/checkout@v6
+              with:
+                  persist-credentials: false
+            - uses: actions/setup-node@v6
+              with:
+                  node-version: '24'
+            - name: Run tests
+              run: node --test tests/*.test.mjs
+            - name: Ensure schema compiler is available
+              run: |
+                  if ! command -v glib-compile-schemas >/dev/null 2>&1; then
+                      sudo apt-get update
+                      sudo apt-get install --yes --no-install-recommends libglib2.0-bin
+                  fi
+            - name: Build extension ZIP
+              id: package
+              run: |
+                  archive=$(./scripts/package.sh)
+                  unzip -tq "$archive"
+                  printf 'archive=%s\n' "$archive" >> "$GITHUB_OUTPUT"
+            - name: Publish GitHub Release
+              env:
+                  GH_TOKEN: ${{ github.token }}
+                  ARCHIVE: ${{ steps.package.outputs.archive }}
+              run: gh release create "$GITHUB_REF_NAME" "$ARCHIVE" --verify-tag --generate-notes

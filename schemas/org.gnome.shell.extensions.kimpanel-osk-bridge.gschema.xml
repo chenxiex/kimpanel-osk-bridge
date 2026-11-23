@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<schemalist>
+    <schema id="org.gnome.shell.extensions.kimpanel-osk-bridge" path="/org/gnome/shell/extensions/kimpanel-osk-bridge/">
+        <key name="candidate-font-scale" type="i">
+            <range min="75" max="150"/>
+            <default>100</default>
+            <summary>Candidate font size</summary>
+            <description>Candidate text size as a percentage of the GNOME Shell theme size.</description>
+        </key>
+    </schema>
+</schemalist>

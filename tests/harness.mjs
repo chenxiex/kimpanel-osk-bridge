@@ -50,6 +50,17 @@ class Actor extends Signals {
         return [...this.children];
     }
 
+    get_n_children() {
+        return this.children.length;
+    }
+
+    get_theme_node() {
+        return {
+            adjust_for_width: width => width,
+            get_length: () => 0,
+        };
+    }
+
     destroy_all_children() {
         for (const child of [...this.children])
             child.destroy();
@@ -59,6 +70,7 @@ class Actor extends Signals {
         this.destroy_all_children();
         const siblings = this.parent?.children;
         siblings?.splice(siblings.indexOf(this), 1);
+        this.parent?.emit('child-removed');
     }
 
     show() {
@@ -70,21 +82,30 @@ class Actor extends Signals {
     }
 }
 
-class ScrollView extends Actor {
-    hadjustment = {value: 0};
+class Bin extends Actor {
+    constructor({child, ...properties} = {}) {
+        super(properties);
+        if (child)
+            this.set_child(child);
+    }
 }
 
 class Button extends Actor {
-    _label = {};
+    _fontScale = 1;
 
-    get_child() {
-        return this._label;
+    ensure_style() {
+        const percent = this.parent?.style?.match(/font-size: (\d+)%/)?.[1] ?? 100;
+        this._fontScale = percent / 100;
+    }
+
+    get_preferred_width() {
+        return [20, this.label.length * 10 * this._fontScale + 20];
     }
 }
 
 class Keyboard extends Actor {
-    constructor(controller) {
-        super();
+    constructor(controller, width = 4096) {
+        super({width});
         this._keyboardController = controller;
         this._suggestions = new Actor();
         this._suggestions.add_child(new Actor({label: 'Native suggestion'}));
@@ -97,6 +118,11 @@ class Keyboard extends Actor {
 
     _onDestroy() {}
 
+    setWidth(width) {
+        this.width = width;
+        this.emit('notify::width');
+    }
+
     setVisible(visible) {
         this.visible = visible;
         this.emit('visibility-changed');
@@ -108,7 +134,28 @@ class Keyboard extends Actor {
     }
 }
 
+class Settings extends Signals {
+    _values = new Map([['candidate-font-scale', 100]]);
+
+    get_int(key) {
+        return this._values.get(key);
+    }
+
+    set_int(key, value) {
+        this._values.set(key, value);
+        this.emit(`changed::${key}`);
+    }
+}
+
 class Extension {
+    constructor(settings) {
+        this.settings = settings;
+    }
+
+    getSettings() {
+        return this.settings;
+    }
+
     gettext(text) {
         return text;
     }
@@ -143,12 +190,12 @@ const GLib = {
         return sources.delete(id);
     },
 };
-const St = {BoxLayout: Actor, Button, ScrollView, PolicyType: {AUTOMATIC: 1, NEVER: 2}};
-const Pango = {EllipsizeMode: {NONE: 0}};
+const St = {BoxLayout: Actor, Button, Bin};
+const Clutter = {ActorAlign: {CENTER: 2}};
 
 const moduleUrl = source => `data:text/javascript,${encodeURIComponent(source)}`;
 const mockKey = 'kimpanel-osk-bridge-test-modules';
-globalThis[mockKey] = {GLib, Pango, St, Keyboard, Extension, InjectionManager};
+globalThis[mockKey] = {GLib, Clutter, St, Keyboard, Extension, InjectionManager};
 
 const bindings = `globalThis[${JSON.stringify(mockKey)}]`;
 const extensionMocks = moduleUrl(`export const {Keyboard, Extension, InjectionManager} = ${bindings};`);
@@ -160,7 +207,7 @@ const mainMocks = moduleUrl(`
 `);
 const mockModules = new Map([
     ['gi://GLib', moduleUrl(`export default ${bindings}.GLib;`)],
-    ['gi://Pango', moduleUrl(`export default ${bindings}.Pango;`)],
+    ['gi://Clutter', moduleUrl(`export default ${bindings}.Clutter;`)],
     ['gi://St', moduleUrl(`export default ${bindings}.St;`)],
     ['resource:///org/gnome/shell/ui/main.js', mainMocks],
     ['resource:///org/gnome/shell/ui/keyboard.js', extensionMocks],
@@ -178,7 +225,7 @@ const {setMain} = await import(mainMocks);
 hooks.deregister();
 delete globalThis[mockKey];
 
-export function createHarness({withKeyboard = true} = {}) {
+export function createHarness({withKeyboard = true, keyboardWidth = 4096} = {}) {
     sources = new Map();
     nextSourceId = 1;
     const calls = {commit: [], raw: [], virtual: [], page: [], select: []};
@@ -209,10 +256,11 @@ export function createHarness({withKeyboard = true} = {}) {
         selectCandidate: index => calls.select.push(index),
     };
     const statusArea = {kimpanel: {kimpanel: panel}};
-    const manager = {_keyboard: withKeyboard ? new Keyboard(controller) : null};
+    const manager = {_keyboard: withKeyboard ? new Keyboard(controller, keyboardWidth) : null};
     const extensionManager = new Signals();
     setMain({keyboard: manager, panel: {statusArea}, extensionManager, inputMethod});
-    const bridge = new Bridge();
+    const settings = new Settings();
+    const bridge = new Bridge(settings);
     let enabled = true;
     bridge.enable();
     const disable = bridge.disable.bind(bridge);
@@ -221,13 +269,13 @@ export function createHarness({withKeyboard = true} = {}) {
         disable();
     };
     return {
-        bridge, controller, inputMethod, panel, keyboard: manager._keyboard, calls,
+        bridge, controller, inputMethod, panel, keyboard: manager._keyboard, calls, settings,
         dispose() {
             if (enabled)
                 bridge.disable();
         },
         createKeyboard() {
-            manager._keyboard = new Keyboard(controller);
+            manager._keyboard = new Keyboard(controller, keyboardWidth);
             return manager._keyboard;
         },
         expireActions() {

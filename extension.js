@@ -38,6 +38,10 @@ export default class KimpanelOskBridge extends Extension {
         this._visibilityId = 0;
         this._keyboardDestroyId = 0;
         this._restoreController = null;
+        this._settings = this.getSettings();
+        this._fontScaleChangedId = this._settings.connect('changed::candidate-font-scale', settings => {
+            this._row?.setFontScale(settings.get_int('candidate-font-scale'));
+        });
 
         const bridge = this;
         this._injection.overrideMethod(KeyboardUI.Keyboard.prototype,
@@ -61,6 +65,10 @@ export default class KimpanelOskBridge extends Extension {
         }
         this._detachPanel();
         this._detachKeyboard(this._keyboard);
+        if (this._settings) {
+            this._settings.disconnect(this._fontScaleChangedId);
+            this._settings = null;
+        }
         this._injection?.clear();
         this._injection = null;
     }
@@ -124,6 +132,7 @@ export default class KimpanelOskBridge extends Extension {
             this._row = new CandidateRow(keyboard,
                 this.gettext('Previous candidate page'),
                 this.gettext('Next candidate page'));
+            this._row.setFontScale(this._settings.get_int('candidate-font-scale'));
         }
         this._visibilityId = keyboard.connect('visibility-changed', () => {
             this._panel?.updateInputPanel();
