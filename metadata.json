@@ -1,0 +1,7 @@
+{
+  "uuid": "kimpanel-osk-bridge@local",
+  "name": "Kimpanel OSK Bridge (Experimental)",
+  "description": "Displays Fcitx5 Kimpanel candidates in GNOME OSK without replacing Kimpanel.",
+  "shell-version": ["49", "50", "51"],
+  "version": 1
+}
