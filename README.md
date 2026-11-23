@@ -1,32 +1,34 @@
-# Kimpanel OSK Bridge — experimental proof of concept
+# Kimpanel OSK Bridge
 
-This is an **untested** small GNOME Shell extension intended for GNOME Shell 49-51. It keeps the official `kimpanel@kde.org` extension installed and enabled, and adds only:
+Kimpanel OSK Bridge shows Fcitx5 candidates above the GNOME on-screen keyboard (OSK). It uses the live backend of the official Kimpanel extension (`kimpanel@kde.org`) and styles its candidate row with the GNOME Shell theme.
 
-1. Kimpanel candidates to GNOME's **existing** on-screen keyboard suggestions row (current candidate page, at most six entries).
-2. An OSK key forwarding adjustment for Fcitx5 when GNOME's standard path would directly commit the typed string.
-3. Conditional suppression of the normal floating Kimpanel candidate popup while the OSK is visible.
+## Use
 
-It does not replace Kimpanel, install a second Kimpanel D-Bus service, replace OSK layouts, or initiate candidate page collection.
+- Tap a word to select it. If the page is wider than the keyboard, use the horizontal scrollbar. GNOME Shell 51 also supports swiping the list directly.
+- Tap **‹** or **›** to request the previous or next page from Fcitx5. The buttons appear when there is another page, and unavailable directions are dimmed. The row refreshes when Fcitx5 sends its updated candidate table.
+- The floating Kimpanel window returns when the OSK closes. Kimpanel also handles preedit or auxiliary text on its own when there are no OSK candidates to show.
 
-## Install / uninstall
+## Install or update
 
-1. Disable `impanel-with-osk` if installed. Keep `kimpanel@kde.org` enabled.
-2. Copy the contents of this folder into `~/.local/share/gnome-shell/extensions/kimpanel-osk-bridge@local/`.
-3. **Log out and back in** to load the new extension into a Wayland GNOME Shell session. Enable it with `gnome-extensions enable kimpanel-osk-bridge@local` (or use Extension Manager).
-4. If it misbehaves, run `gnome-extensions disable kimpanel-osk-bridge@local`. A logout/login resets any lingering Shell state. To uninstall, disable it and remove the above folder.
+1. Keep `kimpanel@kde.org` enabled. Disable `impanel-with-osk` if installed.
+2. Copy `metadata.json`, `extension.js` and `candidateRow.js` into `~/.local/share/gnome-shell/extensions/kimpanel-osk-bridge@local/`.
+3. Log out and back in to GNOME Wayland to load the new code.
+4. If the bridge is disabled, run `gnome-extensions enable kimpanel-osk-bridge@local`.
 
-## Test procedure
+To uninstall, disable the bridge with `gnome-extensions disable kimpanel-osk-bridge@local` and remove its directory.
 
-- With Fcitx5 Chinese Pinyin active, type `n`, `ni`, `nih`, `nihao` using a hardware keyboard while OSK is visible. Candidates should refresh after each change.
-- Repeat using only OSK touch buttons. Characters should reach Fcitx5 instead of being committed directly as plain Latin text.
-- Tap a displayed candidate; it should select the corresponding candidate on the current page.
-- Hide the OSK; the original Kimpanel popup should resume its normal behavior.
-- Check several native Wayland programs (GNOME Text Editor, Firefox, etc.). Different text-input implementations may behave differently.
+## Verify
 
-Check logs with `journalctl --user -b | grep -i 'Kimpanel OSK Bridge'`, or view your user Shell logs.
+The extension needs GNOME Shell, Fcitx5 and Kimpanel. Running the automated tests needs Node.js 22.15 or later. There are no build steps or npm dependencies.
 
-## Limitations / risks
+```sh
+node --test tests/*.test.mjs
+```
 
-This is a source-based prototype, **not tested against an actual GNOME Shell session**. GNOME Shell's private fields and the internal object reference exposed by Kimpanel are not stable APIs. Some keyboard input paths may not reach Fcitx5 or may have compatibility issues. A second input method extension can also interfere with the suggestions row. Only the **current** candidate page and first six candidates are displayed; paging, layout polish, keyboard switch key, full-screen suggestions, and advanced touch gestures are intentionally omitted. The extension assumes the original Kimpanel indicator name `kimpanel` and will do nothing until that indicator exists.
+## Compatibility
 
-Reference code: https://github.com/wengxt/gnome-shell-extension-kimpanel and https://github.com/hallelujahdrive/impanel-with-osk .
+The bridge targets GNOME Shell 49–51. The tests run the bridge with mock Shell objects. An isolated GNOME Shell 51.1 and Kimpanel 94 smoke test exercises the widgets and D-Bus messages with a simulated input method.
+
+GNOME Shell and Kimpanel expose the objects used here through private interfaces. The bridge retains the page flags when Kimpanel receives the `SetLookupTable` message, so paging becomes available after the next lookup-table update if the bridge is enabled midway through a composition. OSK key forwarding depends on the application's input context and the session's input method.
+
+See the upstream implementations for the lookup-table handler, paging signals and keyboard lifecycle. [Kimpanel backend](https://github.com/wengxt/gnome-shell-extension-kimpanel/blob/master/extension.js), [Fcitx5 Kimpanel protocol](https://github.com/fcitx/fcitx5/blob/master/src/ui/kimpanel/kimpanel.cpp), [GNOME Shell keyboard](https://github.com/GNOME/gnome-shell/blob/51.1/js/ui/keyboard.js).

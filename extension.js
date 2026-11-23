@@ -1,38 +1,50 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Experimental Kimpanel -> GNOME OSK bridge; GNOME Shell 49-51.
-// This extension DOES NOT own any D-Bus name or replace the Kimpanel UI.
+
+import GLib from 'gi://GLib';
 
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import * as KeyboardUI from 'resource:///org/gnome/shell/ui/keyboard.js';
 import {Extension, InjectionManager} from 'resource:///org/gnome/shell/extensions/extension.js';
 
-const MAX_VISIBLE_CANDIDATES = 6;
+import {CandidateRow} from './candidateRow.js';
+
+const ACTION_TIMEOUT_MS = 1000;
+
+function wrapMethod(target, name, wrap) {
+    const original = target[name];
+    const ownMethod = Object.hasOwn(target, name);
+    const wrapper = wrap(original);
+    target[name] = wrapper;
+    return () => {
+        if (target[name] !== wrapper)
+            return;
+        if (ownMethod)
+            target[name] = original;
+        else
+            delete target[name];
+    };
+}
 
 export default class KimpanelOskBridge extends Extension {
     enable() {
         this._injection = new InjectionManager();
         this._panel = null;
-        this._panelUpdate = null;
+        this._restorePanel = [];
+        this._lookupPage = null;
+        this._displayedPage = null;
+        this._actionTimeoutId = 0;
         this._keyboard = null;
+        this._row = null;
         this._visibilityId = 0;
-        this._controller = null;
-        this._controllerCommit = null;
-        this._lastSuggestions = null;
-        this._ownsSuggestions = false;
+        this._keyboardDestroyId = 0;
+        this._restoreController = null;
 
         const bridge = this;
-        // Patch new OSKs as well as the currently existing one.
         this._injection.overrideMethod(KeyboardUI.Keyboard.prototype,
             '_setupKeyboard', original => function (...args) {
                 const result = original.apply(this, args);
                 bridge._attachKeyboard(this);
                 return result;
-            });
-
-        this._injection.overrideMethod(KeyboardUI.Keyboard.prototype,
-            '_onDestroy', original => function (...args) {
-                bridge._detachKeyboard(this);
-                return original.apply(this, args);
             });
 
         this._extensionStateId = Main.extensionManager.connect(
@@ -47,20 +59,13 @@ export default class KimpanelOskBridge extends Extension {
             Main.extensionManager.disconnect(this._extensionStateId);
             this._extensionStateId = 0;
         }
-
         this._detachPanel();
         this._detachKeyboard(this._keyboard);
         this._injection?.clear();
         this._injection = null;
-        this._clearSuggestions();
-    }
-
-    _oskVisible() {
-        return !!Main.keyboard?.visible;
     }
 
     _attachPanel() {
-        // Kimpanel's status indicator keeps a reference to its live backend.
         const panel = Main.panel.statusArea.kimpanel?.kimpanel ?? null;
         if (panel === this._panel)
             return;
@@ -71,136 +76,179 @@ export default class KimpanelOskBridge extends Extension {
 
         const bridge = this;
         this._panel = panel;
-        this._panelUpdate = panel.updateInputPanel;
-        panel.updateInputPanel = function (...args) {
-            if (bridge._oskVisible()) {
-                // The original panel may still contain preedit/aux text.
-                // Don't draw that floating UI on top of the OSK.
-                this.inputpanel?.hide();
-                bridge._syncSuggestions(this);
-                return;
-            }
-            bridge._clearSuggestions();
-            return bridge._panelUpdate.apply(this, args);
-        };
+        this._restorePanel.push(wrapMethod(panel, 'updateInputPanel',
+            original => function (...args) {
+                if (bridge._panel === this && bridge._syncCandidates(this)) {
+                    this.inputpanel.hide();
+                    return;
+                }
+                return original.apply(this, args);
+            }));
+
+        if (typeof panel.SetLookupTable === 'function' && typeof panel.emit === 'function') {
+            this._restorePanel.push(wrapMethod(panel, 'SetLookupTable',
+                original => function (labels, texts, attrs, hasPrev, hasNext, ...args) {
+                    if (bridge._panel === this) {
+                        // Kimpanel retains texts as its table but discards both page flags.
+                        bridge._lookupPage = {table: texts, hasPrev, hasNext};
+                    }
+                    return original.call(this, labels, texts, attrs, hasPrev, hasNext, ...args);
+                }));
+        }
+
         panel.updateInputPanel();
     }
 
     _detachPanel() {
-        if (this._panel && this._panelUpdate) {
-            const panel = this._panel;
-            panel.updateInputPanel = this._panelUpdate;
-            this._panel = null;
-            this._panelUpdate = null;
-            this._clearSuggestions();
-            // Restore normal Kimpanel floating popup if still usable.
-            if (panel.inputpanel) {
-                try { panel.updateInputPanel(); } catch (e) { console.debug(e); }
-            }
-        }
+        const panel = this._panel;
+        if (!panel)
+            return;
+
+        this._panel = null;
+        this._lookupPage = null;
+        for (const restore of this._restorePanel)
+            restore();
+        this._restorePanel = [];
+        this._clearCandidates();
+        if (panel.inputpanel)
+            panel.updateInputPanel();
     }
 
     _attachKeyboard(keyboard) {
         if (!keyboard || keyboard === this._keyboard)
             return;
+
         this._detachKeyboard(this._keyboard);
         this._keyboard = keyboard;
-        this._lastSuggestions = null;
+        if (keyboard._suggestions) {
+            this._row = new CandidateRow(keyboard,
+                this.gettext('Previous candidate page'),
+                this.gettext('Next candidate page'));
+        }
         this._visibilityId = keyboard.connect('visibility-changed', () => {
-            this._lastSuggestions = null;
             this._panel?.updateInputPanel();
         });
-        this._patchController(keyboard._keyboardController);
-        if (this._panel)
-            this._panel.updateInputPanel();
+        this._keyboardDestroyId = keyboard.connect('destroy', () => this._detachKeyboard(keyboard));
+        this._patchController(keyboard);
+        this._panel?.updateInputPanel();
     }
 
     _detachKeyboard(keyboard) {
         if (!keyboard || keyboard !== this._keyboard)
             return;
-        if (this._visibilityId) {
-            try { keyboard.disconnect(this._visibilityId); } catch (e) { console.debug(e); }
-            this._visibilityId = 0;
-        }
-        if (this._controller && this._controllerCommit)
-            this._controller.commit = this._controllerCommit;
-        this._controller = null;
-        this._controllerCommit = null;
+
+        if (this._visibilityId)
+            keyboard.disconnect(this._visibilityId);
+        if (this._keyboardDestroyId)
+            keyboard.disconnect(this._keyboardDestroyId);
+        this._visibilityId = 0;
+        this._keyboardDestroyId = 0;
+        this._restoreController?.();
+        this._restoreController = null;
         this._keyboard = null;
-        this._lastSuggestions = null;
+        this._clearCandidates();
+        this._row?.destroy();
+        this._row = null;
+        this._panel?.updateInputPanel();
     }
 
-    _patchController(controller) {
-        if (!controller || typeof controller.commit !== 'function')
+    _patchController(keyboard) {
+        const controller = keyboard._keyboardController;
+        if (typeof controller?.commit !== 'function')
             return;
-        this._controller = controller;
-        this._controllerCommit = controller.commit;
-        const original = controller.commit;
+
         const bridge = this;
+        const restoreController = wrapMethod(controller, 'commit',
+            original => async function (str, modifiers) {
+                // GNOME commits some OSK strings directly. Give Fcitx5 key events on that path.
+                const panel = bridge._panel;
+                const inputMethod = Main.inputMethod;
+                const focus = inputMethod?.currentFocus;
+                if (!panel?.enabled || bridge._restoreController !== restoreController || !keyboard.visible ||
+                    !focus || modifiers?.size > 0 || this._oskCompletionEnabled ||
+                    this._currentSource?.type === 'ibus' ||
+                    typeof inputMethod.handleVirtualKey !== 'function' ||
+                    typeof this._getKeyvalsFromString !== 'function')
+                    return original.call(this, str, modifiers);
 
-        controller.commit = async function (str, modifiers) {
-            // GNOME's default XKB OSK path commits directly into the target.
-            // For Fcitx5, feed virtual key events through the input method.
-            // Retain GNOME's native behavior when it already uses that path.
-            if (!bridge._panel?.enabled || !bridge._oskVisible() ||
-                !Main.inputMethod?.currentFocus || modifiers?.size > 0 ||
-                this._oskCompletionEnabled ||
-                this._currentSource?.type === 'ibus' ||
-                typeof Main.inputMethod.handleVirtualKey !== 'function' ||
-                typeof this._getKeyvalsFromString !== 'function')
-                return original.call(this, str, modifiers);
+                const keyvals = this._getKeyvalsFromString(str);
+                if (!keyvals?.length)
+                    return original.call(this, str, modifiers);
 
-            const keyvals = this._getKeyvalsFromString(str);
-            if (!keyvals?.length)
-                return original.call(this, str, modifiers);
+                for (const keyval of keyvals) {
+                    let handled = false;
+                    try {
+                        handled = await inputMethod.handleVirtualKey(keyval);
+                    } catch (error) {
+                        console.warn(`[Kimpanel OSK Bridge] Virtual key failed: ${error}`);
+                    }
+                    if (bridge._restoreController !== restoreController || !keyboard.visible ||
+                        bridge._panel !== panel || !panel.enabled ||
+                        Main.inputMethod !== inputMethod || inputMethod.currentFocus !== focus)
+                        return;
 
-            for (const keyval of keyvals) {
-                let handled = false;
-                try {
-                    handled = await Main.inputMethod.handleVirtualKey(keyval);
-                } catch (error) {
-                    console.warn(`[Kimpanel OSK Bridge] Virtual key failed: ${error}`);
+                    if (!handled) {
+                        this.keyvalPress(keyval);
+                        this.keyvalRelease(keyval);
+                    }
                 }
-                if (!handled) {
-                    this.keyvalPress(keyval);
-                    this.keyvalRelease(keyval);
-                }
-            }
-        };
-    }
-
-    _syncSuggestions(panel) {
-        if (!this._oskVisible())
-            return;
-        const texts = panel.showLookupTable && panel.enabled
-            ? (panel.table ?? []).slice(0, MAX_VISIBLE_CANDIDATES).map(
-                text => String(text).split('\n')[0])
-            : [];
-        const signature = JSON.stringify([panel.preedit, texts]);
-        if (signature === this._lastSuggestions)
-            return;
-        this._clearSuggestions();
-        this._lastSuggestions = signature;
-        if (!texts.length)
-            return;
-
-        this._ownsSuggestions = true;
-        Main.keyboard.setSuggestionsVisible(true);
-        texts.forEach((text, index) => {
-            Main.keyboard.addSuggestion(text, () => {
-                if (this._panel !== panel) return;
-                // Index is for the currently displayed page (no fake paging).
-                panel.selectCandidate(index);
-                this._lastSuggestions = null;
-                this._clearSuggestions();
             });
-        });
+        this._restoreController = restoreController;
     }
 
-    _clearSuggestions() {
-        if (this._ownsSuggestions)
-            Main.keyboard?.resetSuggestions();
-        this._ownsSuggestions = false;
-        this._lastSuggestions = null;
+    _syncCandidates(panel) {
+        const table = panel.table;
+        if (!this._row || !this._keyboard.visible || !panel.inputpanel ||
+            !panel.enabled || !panel.showLookupTable || !table?.length) {
+            this._clearCandidates();
+            return false;
+        }
+
+        if (this._displayedPage?.table === table)
+            return true;
+
+        const {hasPrev, hasNext} = this._lookupPage?.table === table ? this._lookupPage : {};
+        const page = {
+            table,
+            select: index => this._runCandidateAction(panel, page, () => panel.selectCandidate(index)),
+            previous: hasPrev
+                ? () => this._runCandidateAction(panel, page, () => panel.emit('LookupTablePageUp'))
+                : null,
+            next: hasNext
+                ? () => this._runCandidateAction(panel, page, () => panel.emit('LookupTablePageDown'))
+                : null,
+        };
+        this._cancelActionTimeout();
+        this._displayedPage = page;
+        this._row.show(page);
+        return true;
+    }
+
+    _runCandidateAction(panel, page, action) {
+        if (this._displayedPage !== page || !this._keyboard?.visible ||
+            !panel.enabled || !panel.showLookupTable || panel.table !== page.table ||
+            this._actionTimeoutId)
+            return;
+
+        this._row.setWaiting(true);
+        this._actionTimeoutId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, ACTION_TIMEOUT_MS, () => {
+            this._actionTimeoutId = 0;
+            this._row.setWaiting(false);
+            return GLib.SOURCE_REMOVE;
+        });
+        action();
+    }
+
+    _cancelActionTimeout() {
+        if (!this._actionTimeoutId)
+            return;
+        GLib.source_remove(this._actionTimeoutId);
+        this._actionTimeoutId = 0;
+    }
+
+    _clearCandidates() {
+        this._cancelActionTimeout();
+        this._displayedPage = null;
+        this._row?.hide();
     }
 }
