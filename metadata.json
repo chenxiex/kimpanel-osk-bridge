@@ -1,8 +1,9 @@
 {
-  "uuid": "kimpanel-osk-bridge@local",
-  "name": "Kimpanel OSK Bridge (Experimental)",
-  "description": "Displays Fcitx5 Kimpanel candidates in GNOME OSK without replacing Kimpanel.",
-  "shell-version": ["49", "50", "51"],
+  "uuid": "kimpanel-osk-bridge@chenxiex.github.io",
+  "name": "Kimpanel OSK Bridge",
+  "description": "Adds Fcitx5 input candidates to the GNOME on-screen keyboard, with paging and adjustable text size. Requires Fcitx5 and the Input Method Panel extension (kimpanel@kde.org).",
+  "shell-version": ["51"],
+  "url": "https://github.com/chenxiex/kimpanel-osk-bridge",
   "settings-schema": "org.gnome.shell.extensions.kimpanel-osk-bridge",
-  "version": 2
+  "version": 3
 }

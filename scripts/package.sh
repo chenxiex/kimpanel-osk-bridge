@@ -5,14 +5,14 @@ set -eu
 
 source_dir=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd -P)
 output_dir=${1:-"$source_dir/dist"}
-archive_name=kimpanel-osk-bridge@local.shell-extension.zip
+archive_name=kimpanel-osk-bridge@chenxiex.github.io.shell-extension.zip
 
 if [ "$#" -gt 1 ]; then
     printf 'Usage: %s [output-directory]\n' "$0" >&2
     exit 2
 fi
 
-set -- metadata.json extension.js candidateRow.js prefs.js \
+set -- metadata.json extension.js candidateRow.js prefs.js LICENSE \
     schemas/org.gnome.shell.extensions.kimpanel-osk-bridge.gschema.xml
 for file do
     if [ ! -f "$source_dir/$file" ]; then
