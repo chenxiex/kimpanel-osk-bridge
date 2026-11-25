@@ -68,6 +68,7 @@ class Actor extends Signals {
 
     destroy() {
         this.destroy_all_children();
+        this._handlers.clear();
         const siblings = this.parent?.children;
         siblings?.splice(siblings.indexOf(this), 1);
         this.parent?.emit('child-removed');
@@ -92,6 +93,12 @@ class Bin extends Actor {
 
 class Button extends Actor {
     _fontScale = 1;
+
+    emit(signal) {
+        if (signal === 'clicked' && (!this.visible || !this.reactive))
+            return;
+        super.emit(signal);
+    }
 
     ensure_style() {
         const percent = this.parent?.style?.match(/font-size: (\d+)%/)?.[1] ?? 100;
@@ -135,6 +142,7 @@ class PopupMenuSection extends Signals {
             item.destroy?.();
         this.actor.destroy();
         this.emit('destroy');
+        this._handlers.clear();
     }
 }
 

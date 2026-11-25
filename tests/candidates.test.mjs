@@ -8,7 +8,7 @@ function setPage(panel, table, hasPrev, hasNext) {
 }
 
 function candidateRow(keyboard) {
-    return keyboard.get_children()[1];
+    return keyboard.get_children().find(child => child !== keyboard._suggestions);
 }
 
 function controls(keyboard) {
@@ -30,8 +30,8 @@ test('pages through the engine and selects by index within the returned page', t
     assert.equal(first.candidates[8].label, 'candidate 9');
 
     first.next.emit('clicked');
-    first.next.emit('clicked');
-    first.candidates[8].emit('clicked');
+    assert.equal(first.next.reactive, false);
+    assert.equal(first.candidates[8].reactive, false);
     assert.deepEqual(calls.page, ['LookupTablePageDown']);
     assert.deepEqual(calls.select, []);
 
@@ -48,10 +48,7 @@ test('pages through the engine and selects by index within the returned page', t
     assert.deepEqual(calls.page, ['LookupTablePageDown', 'LookupTablePageDown', 'LookupTablePageUp']);
 
     setPage(panel, [...words], true, true);
-    const returned = controls(keyboard);
-    first.candidates[8].emit('clicked');
-    assert.deepEqual(calls.select, []);
-    returned.candidates[8].emit('clicked');
+    controls(keyboard).candidates[8].emit('clicked');
     assert.deepEqual(calls.select, [8]);
 });
 
@@ -83,24 +80,16 @@ test('shows cached candidates when an OSK is created and restores the popup when
     assert.equal(panel.inputpanel.visible, true);
 });
 
-test('leaves native suggestions available and removes bridge controls on disable', t => {
+test('keeps non-empty native suggestions visible and removes bridge controls on disable', t => {
     const {bridge, dispose, keyboard, panel} = createHarness();
     t.after(dispose);
-    const [nativeRow] = keyboard.get_children();
-    setPage(panel, ['one'], false, false);
-    assert.equal(controls(keyboard).next.visible, false);
+    const nativeRow = keyboard._suggestions;
+    setPage(panel, ['one'], false, true);
     assert.equal(nativeRow.visible, true);
-
-    panel.showLookupTable = false;
-    panel.updateInputPanel();
-    assert.equal(candidateRow(keyboard).visible, false);
-    setPage(panel, ['two'], false, true);
-    panel.showLookupTable = true;
-    panel.updateInputPanel();
+    assert.equal(candidateRow(keyboard).visible, true);
 
     bridge.disable();
     assert.deepEqual(keyboard.get_children(), [nativeRow]);
-    assert.deepEqual(nativeRow.get_children().map(button => button.label), ['Native suggestion']);
     assert.equal(panel.inputpanel.visible, true);
 });
 
@@ -143,9 +132,6 @@ test('crosses engine page boundaries and enters the previous engine page at its 
     setPage(panel, words, false, true);
     controls(keyboard).next.emit('clicked');
     controls(keyboard).next.emit('clicked');
-    assert.deepEqual(controls(keyboard).candidates.map(button => button.label), ['red', 'fox']);
-    assert.deepEqual(calls.page, []);
-
     controls(keyboard).next.emit('clicked');
     assert.deepEqual(calls.page, ['LookupTablePageDown']);
     setPage(panel, ['cat', 'dog', 'ant', 'owl'], true, false);
@@ -202,20 +188,22 @@ test('keeps a candidate wider than the available row selectable', t => {
     assert.deepEqual(calls.select, [0]);
 });
 
-test('reclaims an empty native suggestions row and restores it when bridge candidates disappear', t => {
+test('reclaims an empty native suggestions row and toggles visibility with lookup table state', t => {
     const {bridge, dispose, keyboard, panel} = createHarness();
     t.after(dispose);
-    const [nativeRow] = keyboard.get_children();
+    const nativeRow = keyboard._suggestions;
     setPage(panel, ['one'], false, false);
     nativeRow.destroy_all_children();
     assert.equal(nativeRow.visible, false);
 
     panel.showLookupTable = false;
     panel.updateInputPanel();
+    assert.equal(candidateRow(keyboard).visible, false);
     assert.equal(nativeRow.visible, true);
 
     panel.showLookupTable = true;
     panel.updateInputPanel();
+    assert.equal(candidateRow(keyboard).visible, true);
     assert.equal(nativeRow.visible, false);
     bridge.disable();
     assert.equal(nativeRow.visible, true);

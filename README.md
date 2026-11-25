@@ -12,7 +12,7 @@ Kimpanel OSK Bridge shows Fcitx5 candidates above the GNOME on-screen keyboard (
 
 ## Install or update
 
-Keep `kimpanel@kde.org` enabled. Disable `impanel-with-osk` if installed. If you have the earlier `@local` build enabled, disable it with `gnome-extensions disable kimpanel-osk-bridge@local` before switching.
+Keep `kimpanel@kde.org` enabled. Disable `impanel-with-osk` if installed. 
 
 Run the commands below with `curl` and `unzip` to download the extension ZIP from the [latest release](https://github.com/chenxiex/kimpanel-osk-bridge/releases/latest) and overwrite the installed files.
 

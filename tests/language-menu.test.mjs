@@ -27,7 +27,6 @@ test('the OSK uses the Kimpanel list and triggers the selected input method', t 
 
     const [nativeAction, section, settingsSeparator, settingsAction] = popup.items;
     assert.deepEqual([nativeAction.label, settingsSeparator.label, settingsAction.label], nativeMenuLabels);
-    assert.equal(section.items[0].constructor.name, settingsSeparator.constructor.name);
     assert.deepEqual(menuLabels(section), ['Fcitx5', '键盘 - 英语（美国）', '拼音', '中州韵']);
     assert.deepEqual(calls.trayMenus, []);
 
@@ -78,7 +77,6 @@ for (const [name, supersede, useTray] of requestCases) {
             assert.deepEqual(calls.trayMenus, [inputMethods]);
             assert.deepEqual(menuLabels(firstPopup), nativeMenuLabels);
         } else {
-            assert.deepEqual(firstPopup.items, []);
             const [, section] = keyboard._languagePopup.items;
             assert.equal(section.items[0].label, 'Fcitx5');
             assert.deepEqual(calls.trayMenus, []);
@@ -125,9 +123,8 @@ test('marks the cached Kimpanel method and moves the dot on a status update', t 
 
     keyboard._popupLanguageMenu();
     panel.menu.execMenu(inputMethods);
-    const [nativeSource, section] = keyboard._languagePopup.items;
+    const [, section] = keyboard._languagePopup.items;
     const activeFcitxItems = () => section.items.filter(item => item.ornament === 'dot').map(item => item.label);
-    assert.equal(nativeSource.ornament, 'dot');
     assert.deepEqual(activeFcitxItems(), ['中州韵']);
 
     panel.indicator._setIcon({

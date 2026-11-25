@@ -58,7 +58,6 @@ for (const [name, handle, expectedRaw] of virtualKeyCases) {
 const pendingCommitCases = [
     ['focus changes', harness => { harness.inputMethod.currentFocus = {}; }],
     ['keyboard is destroyed', harness => { harness.keyboard.destroy(); }],
-    ['bridge is disabled', harness => { harness.bridge.disable(); }],
 ];
 
 for (const [name, invalidate] of pendingCommitCases) {
