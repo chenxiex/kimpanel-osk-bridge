@@ -103,6 +103,48 @@ class Button extends Actor {
     }
 }
 
+class PopupMenuSection extends Signals {
+    actor = new Actor();
+
+    addMenuItem(item, position = this.actor.children.length) {
+        item.actor.parent = this.actor;
+        item.actor._delegate = item;
+        this.actor.children.splice(position, 0, item.actor);
+    }
+
+    addAction(label, activate) {
+        const item = {
+            label, activate, actor: new Actor(),
+            setOrnament(ornament) { this.ornament = ornament; },
+        };
+        this.addMenuItem(item);
+        return item;
+    }
+
+    _getMenuItems() {
+        return this.actor.children.map(actor => actor._delegate);
+    }
+
+    get items() {
+        return this._getMenuItems();
+    }
+
+    destroy() {
+        this.isOpen = false;
+        for (const item of this.items)
+            item.destroy?.();
+        this.actor.destroy();
+        this.emit('destroy');
+    }
+}
+
+class PopupSeparatorMenuItem {
+    constructor(label = '') {
+        this.label = label;
+        this.actor = new Actor();
+    }
+}
+
 class Keyboard extends Actor {
     constructor(controller, width = 4096) {
         super({width});
@@ -116,7 +158,19 @@ class Keyboard extends Actor {
 
     _setupKeyboard() {}
 
-    _onDestroy() {}
+    _onDestroy() {
+        this._languagePopup?.destroy();
+        this._languagePopup = null;
+    }
+
+    _popupLanguageMenu() {
+        this._languagePopup?.destroy();
+        this._languagePopup = new PopupMenuSection();
+        this._languagePopup.addAction('English (US)', () => {}).setOrnament(Ornament.DOT);
+        this._languagePopup.addMenuItem(new PopupSeparatorMenuItem());
+        this._languagePopup.addAction('Keyboard Settings', () => {});
+        this._languagePopup.isOpen = true;
+    }
 
     setWidth(width) {
         this.width = width;
@@ -192,10 +246,12 @@ const GLib = {
 };
 const St = {BoxLayout: Actor, Button, Bin};
 const Clutter = {ActorAlign: {CENTER: 2}};
+const Ornament = {DOT: 'dot', NO_DOT: 'no-dot'};
 
 const moduleUrl = source => `data:text/javascript,${encodeURIComponent(source)}`;
 const mockKey = 'kimpanel-osk-bridge-test-modules';
-globalThis[mockKey] = {GLib, Clutter, St, Keyboard, Extension, InjectionManager};
+globalThis[mockKey] = {GLib, Clutter, St, Keyboard, Extension, InjectionManager,
+    Ornament, PopupMenuSection, PopupSeparatorMenuItem};
 
 const bindings = `globalThis[${JSON.stringify(mockKey)}]`;
 const extensionMocks = moduleUrl(`export const {Keyboard, Extension, InjectionManager} = ${bindings};`);
@@ -211,6 +267,8 @@ const mockModules = new Map([
     ['gi://St', moduleUrl(`export default ${bindings}.St;`)],
     ['resource:///org/gnome/shell/ui/main.js', mainMocks],
     ['resource:///org/gnome/shell/ui/keyboard.js', extensionMocks],
+    ['resource:///org/gnome/shell/ui/popupMenu.js',
+        moduleUrl(`export const {Ornament, PopupMenuSection, PopupSeparatorMenuItem} = ${bindings};`)],
     ['resource:///org/gnome/shell/extensions/extension.js', extensionMocks],
 ]);
 
@@ -228,7 +286,7 @@ delete globalThis[mockKey];
 export function createHarness({withKeyboard = true, keyboardWidth = 4096} = {}) {
     sources = new Map();
     nextSourceId = 1;
-    const calls = {commit: [], raw: [], virtual: [], page: [], select: []};
+    const calls = {commit: [], raw: [], virtual: [], page: [], select: [], properties: [], trayMenus: []};
     const controller = {
         commit: async (str, modifiers) => { calls.commit.push([str, modifiers]); },
         _getKeyvalsFromString: str => Array.from(str, char => char.codePointAt(0)),
@@ -254,6 +312,12 @@ export function createHarness({withKeyboard = true, keyboardWidth = 4096} = {}) 
         },
         emit: signal => calls.page.push(signal),
         selectCandidate: index => calls.select.push(index),
+        triggerProperty: property => calls.properties.push(property),
+        menu: {execMenu: properties => calls.trayMenus.push(properties)},
+        indicator: {
+            _properties: {},
+            _setIcon(status) { this._properties[status.key] = status; },
+        },
     };
     const statusArea = {kimpanel: {kimpanel: panel}};
     const manager = {_keyboard: withKeyboard ? new Keyboard(controller, keyboardWidth) : null};
